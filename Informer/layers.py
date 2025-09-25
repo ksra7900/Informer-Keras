@@ -24,17 +24,33 @@ class embedding(layers.Layer):
                  d_model= 512,
                  dropout= 0.1,
                  **kwargs):
+        # prepare value embedding
         self.value_embedding= layers.Dense(d_model)
+        # prepare positional embedding
         self.positional_embedding= self.add_weight(
             "pos_emb", shape=(1, 1000, d_model), initializer='random_normal'
             )
+        # prepare time feature embedding 
+        self.hour_emb= layers.Embedding(input_dim= 24, output_dim= d_model)
+        self.week_emb= layers.Embedding(input_dim= 7, output_dim= d_model)
+        self.month_emb= layers.Embedding(input_dim= 12, output_dim= d_model)
         self.dropout= layers.Dropout(dropout)
         
-    def call(self, inputs):
-        value_emb= self.value_embedding(inputs)
-        seq_len= tf.shape(inputs)[1]
-        x= value_emb + self.positional_embedding[:, :seq_len, :]
-        return self.dropout(x)
+    def call(self, 
+             values,
+             times):
+        # value embedding
+        value_emb= self.value_embedding(values)
+        # prepare data for sequence embedding
+        seq_len= tf.shape(values)[1]
+        # time feature embedding 
+        hour= self.hour_emb(times[:,:,0])
+        weekday= self.week_emb(times[:,:,1])
+        month= self.month_emb(times[:,:,2])
+        time_emb= hour + weekday + month
+        # combine embeddings
+        combined_emb= value_emb + self.positional_embedding[:, :seq_len, :] + time_emb
+        return self.dropout(combined_emb)
     
 class ProbSparce(layers.Layer):
     def __init__(self, 
@@ -46,10 +62,12 @@ class ProbSparce(layers.Layer):
                                        activation='elu')
         self.input_emb= embedding()
     
-    def build(self, inputs):
+    def build(self,
+              values,
+              times,):
         # generate input 
-        input_conv= self.input_conv(inputs)
-        input_emb= self.input_emb(inputs)
+        input_conv= self.input_conv(values)
+        input_emb= self.input_emb(values, times)
         input_val= input_conv + input_emb 
         
     
