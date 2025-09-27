@@ -74,6 +74,8 @@ class ProbSparse(layers.Layer):
     def __init__(self, 
                  d_model,
                  num_heads,
+                 mask= False,
+                 cross= False,
                  c= 5,
                  dropout= 0.1,
                  **kwargs):
@@ -82,6 +84,8 @@ class ProbSparse(layers.Layer):
                                        filters=d_model,
                                        padding='same', 
                                        activation='elu')
+        self.mask= mask
+        self.cross= cross
         self.c= c
         self.input_emb= Embedding(d_model=d_model)
         self.d_model= d_model
@@ -102,15 +106,28 @@ class ProbSparse(layers.Layer):
     
     def call(self,
               values,
-              times,):
-        # generate input 
-        input_emb= self.input_emb(values, times)
-        input_val= self.input_conv(input_emb)
+              times,
+              context= None):
         
-        # start ProbSparse(full attention)
-        Q= self.wq(input_val)
-        K= self.wk(input_val)
-        V= self.wv(input_val)
+        if self.cross and context is not None:
+            # generate input 
+            input_emb= self.input_emb(values, times)
+            input_val= self.input_conv(input_emb)
+            
+            # start ProbSparse(full attention)
+            Q= self.wq(input_val)
+            K= self.wk(context)
+            V= self.wv(context)
+            
+        else:    
+            # generate input 
+            input_emb= self.input_emb(values, times)
+            input_val= self.input_conv(input_emb)
+            
+            # start ProbSparse(full attention)
+            Q= self.wq(input_val)
+            K= self.wk(input_val)
+            V= self.wv(input_val)
         
         # reshape & transpose
         batch_size= tf.shape(input_val)[0]
@@ -126,24 +143,60 @@ class ProbSparse(layers.Layer):
         # sampling  
         query_len= tf.shape(Q)[2]
         m= tf.cast(query_len, tf.float32)
-        u= tf.cast(self.c * tf.math.log(m), tf.int32)
+        u= tf.minimum(tf.cast(self.c * tf.math.log(m), tf.int32), query_len)
         
         n= tf.shape(K)[2] # number of key
         U= tf.cast(m * tf.math.log(tf.cast(n, tf.float32)), tf.int32)
         
         # select shuffle keys idx
         idx= tf.random.shuffle(tf.range(n))[:U]
-        k_sample = tf.gather(K, idx, axis=2)
+        K_sample = tf.gather(K, idx, axis=2)
+        
+        # compute score
+        scores_sample = tf.einsum("bhld,bhmd->bhlm", Q, K_sample)
+        
+        # sparsity
+        M= tf.reduce_max(scores_sample, axis=-1) - tf.reduce_mean(scores_sample, axis=-1)
+
+        # top u
+        top_values, top_idx= tf.math.top_k(M, k=u, sorted=False)
+        u= tf.shape(top_idx)[-1]
+        batch_size= tf.shape(Q)[0]
+        
+        batch_idx= tf.range(batch_size)[:, None, None]
+        head_idx= tf.range(self.num_heads)[None, :, None]
+        
+        batch_idx= tf.tile(batch_idx, [1, batch_size, u])
+        head_idx= tf.tile(head_idx, [self.num_heads, 1, u])
+        gather_idx= tf.stack([batch_idx, head_idx, top_idx], axis=-1)
         
         # attention mechnism
-        logits= tf.matmul(Q, K, transpose_b=True) / tf.math.sqrt(tf.cast(self.d_k, tf.float32))
-        weights= tf.nn.softmax(logits)
-        weights= self.dropout(weights)
+        top_Q= tf.gather_nd(Q, gather_idx)
+        scores= tf.einsum("bhud, bhnd -> bhun", top_Q, K) / tf.math.sqrt(tf.cast(self.d_k, tf.float32))
+        # masking
+        if self.mask:
+            seq_len_q= tf.shape(scores)[-2]
+            seq_len_k= tf.shape(scores)[-1]
+            mask= tf.linalg.band_part(tf.ones((seq_len_q, seq_len_k)), -1, 0)
+            mask= 1.0 - mask
+            scores -= 1e9 * mask
+        attn= tf.nn.softmax(scores, axis=-1)
+        output_top= tf.einsum("bhun, bhnd -> bhud", attn, V)
         
-        output= tf.matmul(weights, V)
-        output= tf.transpose(output, perm=[0, 2, 1, 3])
-        output_attention= tf.reshape(output, (batch_size, -1, self.d_model))
-        return self.dence(output_attention)
+        # get mean for another V
+        V_mean= tf.reduce_mean(V, axis=2, keepdims=True)
+        seq_len= tf.shape(Q)[2]
+        output = tf.tile(V_mean, [1, 1, seq_len, 1])
+
+        output = tf.tensor_scatter_nd_update(
+                    output,
+                    tf.reshape(gather_idx, [-1, 3]),
+                    tf.reshape(output_top, [-1, self.d_k])
+                )
+        
+        output = tf.transpose(output, perm=[0, 2, 1, 3])  
+        output = tf.reshape(output, (batch_size, seq_len, self.d_model))  
+        return self.dropout(output)
         
         
 if __name__ == '__main__':
