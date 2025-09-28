@@ -39,7 +39,7 @@ class Decoder(layers.Layer):
         
         self.dropout= layers.Dropout(dropout)
         
-    def call(self, value, enc_value, time, enc_time):
+    def call(self, value, enc_value, time):
         # self attention (masked)
         attn1= self.self_attn(value, time)
         out1= self.norm_layer1(value + attn1)
@@ -60,11 +60,11 @@ if __name__ == '__main__':
 
     # ورودی‌های encoder
     enc_values = tf.random.normal((batch_size, L, 1))
-    enc_times = tf.cast(tf.random.uniform(
+    '''enc_times = tf.cast(tf.random.uniform(
         (batch_size, L, 3),
         minval=0,
         maxval=[24, 7, 12]
-    ), tf.int32)
+    ), tf.int32)'''
 
     # ورودی‌های decoder (مثلاً sequence کوتاه‌تر)
     dec_values = tf.random.normal((batch_size, out_len, 1))
@@ -78,7 +78,7 @@ if __name__ == '__main__':
     decoder = Decoder(d_model=d_model, num_heads=2)
 
     # forward pass
-    output = decoder(dec_values, enc_values, dec_times, enc_times)
+    output = decoder(dec_values, enc_values, dec_times)
 
     print("Decoder output shape:", output.shape)
 

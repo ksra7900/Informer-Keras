@@ -4,37 +4,37 @@ from keras import layers
 from encoder import Encoder
 from decoder import Decoder
 
-class Informer(layers.Layer):
+class Informer(keras.Model):
     def __init__(self,
                  d_model,
                  num_heads,
-                 num_encoder= 2,
-                 num_decoder= 1,
+                 e_layers= 2,
+                 d_layers= 1,
                  d_ff= 512,
                  dropout= 0.1,
                  c= 5,
                  **kwargs):
         super(Informer, self).__init__(**kwargs)
         
-        self.encoder_layer= [Encoder(d_model= d_model, 
+        self.encoder= [Encoder(d_model= d_model, 
                                     num_heads= num_heads,
                                     dropout= dropout,
-                                    c= c) for _ in range(num_encoder)]
+                                    c= c) for _ in range(e_layers)]
         
-        self.decoder_layer= [Decoder(d_model= d_model, 
+        self.decoder= [Decoder(d_model= d_model, 
                                     num_heads= num_heads,
                                     dropout= dropout,
-                                    c= c) for _ in range(num_decoder)]
+                                    c= c) for _ in range(d_layers)]
         
         self.output_layer= layers.Dense(1)
         
-    def call(self, enc_value, enc_time, dec_value, dec_time):
+    def call(self, enc_value, context_time, dec_value, dec_time):
         # prepare value for encoder
         x= enc_value
-        times= enc_time
+        times= context_time
         
         # encoder layer
-        for enc in self.encoder_layer:
+        for enc in self.encoder:
             x= enc(x, times)
             times= times[:, ::2, :]
         
@@ -46,8 +46,8 @@ class Informer(layers.Layer):
         dec_t= dec_time
         
         # decoder layer
-        for dec in self.decoder_layer:
-            y= dec(y, output_enc, dec_t, enc_time)
+        for dec in self.decoder:
+            y= dec(y, output_enc, dec_t)
             
         # output layer
         output= self.output_layer(y)
@@ -69,7 +69,7 @@ if __name__ == '__main__':
     dec_values_in = layers.Input(shape=(L_dec, 1), name='dec_values')
     dec_times_in = layers.Input(shape=(L_dec, 3), dtype='int32', name='dec_times')
 
-    model_core = Informer(d_model=d_model, num_heads=2, num_encoder=e_layers, num_decoder=d_layers)
+    model_core = Informer(d_model=d_model, num_heads=2, e_layers=e_layers, d_layers=d_layers)
     outputs = model_core(enc_values_in, enc_times_in, dec_values_in, dec_times_in)
 
     model = keras.Model(inputs=[enc_values_in, enc_times_in, dec_values_in, dec_times_in], outputs=outputs)
