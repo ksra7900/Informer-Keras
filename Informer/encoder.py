@@ -1,7 +1,7 @@
 import tensorflow as tf
 import keras
 from keras import layers
-from layers import ProbSparse, Distilling
+from Informer.layers import ProbSparse, Distilling
 
 class Encoder(layers.Layer):
     def __init__(self,

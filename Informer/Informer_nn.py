@@ -1,8 +1,8 @@
 import tensorflow as tf
 import keras
 from keras import layers
-from encoder import Encoder
-from decoder import Decoder
+from Informer.encoder import Encoder
+from Informer.decoder import Decoder
 
 class Informer(keras.Model):
     def __init__(self,

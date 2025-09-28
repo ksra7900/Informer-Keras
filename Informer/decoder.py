@@ -1,7 +1,7 @@
 import tensorflow as tf
 import keras
 from keras import layers
-from layers import ProbSparse
+from Informer.layers import ProbSparse
 
 class Decoder(layers.Layer):
     def __init__(self,
