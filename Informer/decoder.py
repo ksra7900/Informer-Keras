@@ -38,14 +38,16 @@ class Decoder(layers.Layer):
         self.norm_layer3= layers.LayerNormalization(epsilon=1e-6)
         
         self.dropout= layers.Dropout(dropout)
+        self.input_projection= layers.Dense(d_model)
         
-    def call(self, value, enc_value, time):
+    def call(self, value, enc_value, time, enc_time):
+        value_proj= self.input_projection(value)
         # self attention (masked)
-        attn1= self.self_attn(value, time)
-        out1= self.norm_layer1(value + attn1)
+        attn1= self.self_attn(value_proj, time)
+        out1= self.norm_layer1(value_proj + attn1)
         
         # cross attention
-        attn2= self.cross_attn(attn1, time, context=enc_value)
+        attn2 = self.cross_attn(out1, time, context=enc_value, context_time=enc_time)
         out2= self.norm_layer2(out1 + attn2)
         
         # feed forward network
@@ -54,33 +56,29 @@ class Decoder(layers.Layer):
         
         return self.dropout(output)
     
-if __name__ == '__main__':
-    batch_size, L, d_model = 2, 8, 4
-    out_len = 4   # طول دنباله‌ی decoder
+if __name__ == "__main__":
 
-    # ورودی‌های encoder
-    enc_values = tf.random.normal((batch_size, L, 1))
-    '''enc_times = tf.cast(tf.random.uniform(
-        (batch_size, L, 3),
-        minval=0,
-        maxval=[24, 7, 12]
-    ), tf.int32)'''
+    batch_size = 2
+    L = 8          # طول ورودی encoder
+    out_len = 8    # طول ورودی decoder
+    d_model = 4    # تعداد feature ها (ابعاد ورودی)
 
-    # ورودی‌های decoder (مثلاً sequence کوتاه‌تر)
-    dec_values = tf.random.normal((batch_size, out_len, 1))
-    dec_times = tf.cast(tf.random.uniform(
-        (batch_size, out_len, 3),
-        minval=0,
-        maxval=[24, 7, 12]
-    ), tf.int32)
+    # ورودی انکودر (values, times)
+    enc_values = tf.random.normal((batch_size, L, d_model))
+    enc_times = tf.random.uniform((batch_size, L, 3), maxval=24, dtype=tf.int32)
 
-    # ساخت Decoder
+    # ورودی دیکودر (values, times)
+    dec_values = tf.random.normal((batch_size, out_len, d_model))
+    dec_times = tf.random.uniform((batch_size, out_len, 3), maxval=24, dtype=tf.int32)
+
+    # تست Decoder
     decoder = Decoder(d_model=d_model, num_heads=2)
+    out = decoder(dec_values, enc_values, dec_times, enc_times)
 
-    # forward pass
-    output = decoder(dec_values, enc_values, dec_times)
+    print("Input shape (dec_values):", dec_values.shape)
+    print("Input shape (enc_values):", enc_values.shape)
+    print("Output shape:", out.shape)
 
-    print("Decoder output shape:", output.shape)
 
         
         

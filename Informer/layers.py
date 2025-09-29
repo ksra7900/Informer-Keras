@@ -107,15 +107,18 @@ class ProbSparse(layers.Layer):
     def call(self,
               values,
               times,
-              context= None):
+              context= None,
+              context_time= None):
         
         if self.cross and context is not None:
             # generate input 
             input_emb= self.input_emb(values, times)
             input_val= self.input_conv(input_emb)
+            Q= self.wq(input_val)
             
             # start ProbSparse(full attention)
-            Q= self.wq(input_val)
+            context_emb= self.input_emb(context, context_time)
+            context= self.input_conv(context_emb)
             K= self.wk(context)
             V= self.wv(context)
             
@@ -144,6 +147,7 @@ class ProbSparse(layers.Layer):
         query_len= tf.shape(Q)[2]
         m= tf.cast(query_len, tf.float32)
         u= tf.minimum(tf.cast(self.c * tf.math.log(m), tf.int32), query_len)
+        u= tf.cast(u, tf.int32)
         
         n= tf.shape(K)[2] # number of key
         U= tf.cast(m * tf.math.log(tf.cast(n, tf.float32)), tf.int32)
@@ -161,13 +165,17 @@ class ProbSparse(layers.Layer):
         # top u
         top_values, top_idx= tf.math.top_k(M, k=u, sorted=False)
         u= tf.shape(top_idx)[-1]
-        batch_size= tf.shape(Q)[0]
-        
-        batch_idx= tf.range(batch_size)[:, None, None]
-        head_idx= tf.range(self.num_heads)[None, :, None]
-        
-        batch_idx= tf.tile(batch_idx, [1, batch_size, u])
-        head_idx= tf.tile(head_idx, [self.num_heads, 1, u])
+        batch_size = tf.shape(Q)[0]
+
+        # build batch_idx and head_idx with shape (B, H, u)
+        batch_idx = tf.reshape(tf.range(batch_size, dtype=tf.int32), (batch_size, 1, 1))       # (B,1,1)
+        batch_idx = tf.broadcast_to(batch_idx, [batch_size, self.num_heads, u])               # (B,H,u)
+
+        head_idx = tf.reshape(tf.range(self.num_heads, dtype=tf.int32), (1, self.num_heads, 1))  # (1,H,1)
+        head_idx = tf.broadcast_to(head_idx, [batch_size, self.num_heads, u])                    # (B,H,u)
+
+        # ensure top_idx is int32
+        top_idx = tf.cast(top_idx, tf.int32) 
         gather_idx= tf.stack([batch_idx, head_idx, top_idx], axis=-1)
         
         # attention mechnism

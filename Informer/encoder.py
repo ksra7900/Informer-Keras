@@ -33,11 +33,13 @@ class Encoder(layers.Layer):
         self.norm_layer1= layers.LayerNormalization(epsilon=1e-6)
         self.norm_layer2= layers.LayerNormalization(epsilon=1e-6)
         self.dropout= layers.Dropout(dropout)
+        self.input_projection= layers.Dense(d_model)
         
     def call(self, value, time):
+        value_proj= self.input_projection(value)
         # ProbSparse Attention
-        attn_layer= self.attn_layer(value, time) 
-        out1= self.norm_layer1(value + attn_layer)
+        attn_layer= self.attn_layer(value_proj, time) 
+        out1= self.norm_layer1(value_proj + attn_layer)
         
         # FeedForward
         ffn_output= self.ffn(out1)

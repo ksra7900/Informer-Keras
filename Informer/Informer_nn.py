@@ -28,7 +28,8 @@ class Informer(keras.Model):
         
         self.output_layer= layers.Dense(1)
         
-    def call(self, enc_value, context_time, dec_value, dec_time):
+    def call(self, inputs, training= False):
+        enc_value, context_time, dec_value, dec_time= inputs
         # prepare value for encoder
         x= enc_value
         times= context_time
@@ -47,7 +48,7 @@ class Informer(keras.Model):
         
         # decoder layer
         for dec in self.decoder:
-            y= dec(y, output_enc, dec_t)
+            y= dec(y, output_enc, dec_t, times)
             
         # output layer
         output= self.output_layer(y)
