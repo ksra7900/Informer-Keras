@@ -2,15 +2,26 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from sklearn.preprocessing import MinMaxScaler, PowerTransformer
-from keras import models
-from keras import layers
+import keras
+from keras import optimizers
+from keras.callbacks import EarlyStopping
 import tensorflow as tf
 from Informer import Informer
 import warnings
 warnings.filterwarnings('ignore')
+import os
+os.environ["XLA_FLAGS"] = "--xla_gpu_strict_conv_algorithm_picker=false"
 
-enc_len = 144   # طول ورودی انکودر (یک روز گذشته)
-dec_len = 24    # طول ورودی دیکودر (یک روز آینده)
+keras.backend.clear_session()
+
+gpus = tf.config.experimental.list_physical_devices('GPU')
+for gpu in gpus:
+    tf.config.experimental.set_memory_growth(gpu, True)
+
+
+# 144
+enc_len = 1008   # lenght of encoder (past days)
+dec_len = 24    # lenght of decoder (future day)
 
 def create_enc_dec_sequences(X, y, date, enc_len, dec_len):
     enc_X, enc_time, dec_X, dec_time, target = [], [], [], [], []
@@ -71,16 +82,62 @@ dataset = tf.data.Dataset.from_tensor_slices(((enc_X, enc_time_used, dec_X, dec_
 train_size = int(0.7 * len(dataset))
 val_size = int(0.15 * len(dataset))
 
-train_ds = dataset.take(train_size).batch(32).shuffle(100)
-val_ds = dataset.skip(train_size).take(val_size).batch(32)
-test_ds = dataset.skip(train_size + val_size).batch(32)
+train_ds = dataset.take(train_size).batch(2)
+val_ds = dataset.skip(train_size).take(val_size).batch(2)
+test_ds = dataset.skip(train_size + val_size).batch(2)
 
-# تعریف مدل
-model = Informer(d_model=64, num_heads=4)  # مقادیر رو بسته به منابع تغییر بده
-model.compile(optimizer='adam', loss='mse')
+# early stopping
+callback= EarlyStopping(monitor='val_loss',
+                        patience=20,
+                        restore_best_weights= True)
 
-# آموزش
-history = model.fit(train_ds, validation_data=val_ds, epochs=10, batch_size=32)
+# define model
+model = Informer(d_model=32, 
+                 num_heads=2,
+                 e_layers=1,
+                 d_layers=1
+                 )
+model.compile(optimizer=optimizers.Adam(learning_rate=0.001),
+              loss='MAE',
+              metrics=['accuracy'])
 
-# ارزیابی
+# learn
+history = model.fit(train_ds, 
+                    validation_data=val_ds, 
+                    epochs=1000, 
+                    callbacks=[callback]
+                    )
+
+# evaluation
 model.evaluate(test_ds)
+#model.save('model.h5')
+
+# prediction & visualization
+y_pred= model.predict(test_ds)
+y_true = np.concatenate([y for x, y in test_ds], axis=0)
+
+y_pred_rescaled = MinMax_scaler.inverse_transform(y_pred.reshape(-1, 1)).reshape(y_pred.shape)
+y_true_rescaled = MinMax_scaler.inverse_transform(y_true.reshape(-1, 1)).reshape(y_true.shape)
+
+plt.figure(figsize=(12,6))
+plt.plot(y_true_rescaled[0], label="Actual", marker='o')
+plt.plot(y_pred_rescaled[0], label="Predicted", marker='x')
+plt.title("Test Sequence Prediction vs Actual")
+plt.xlabel("Time step")
+plt.ylabel("Target value")
+plt.legend()
+plt.show()
+
+# visualize loss & val_loss
+train_loss = history.history['loss']
+val_loss = history.history['val_loss']
+
+plt.figure(figsize=(10,6))
+plt.plot(train_loss, label="Training Loss")
+plt.plot(val_loss, label="Validation Loss")
+plt.title("Training vs Validation Loss")
+plt.xlabel("Epoch")
+plt.ylabel("Loss")
+plt.legend()
+plt.grid(True)
+plt.show()

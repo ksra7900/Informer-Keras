@@ -1,6 +1,6 @@
 import tensorflow  as tf
 from keras import layers
-from keras import activations
+import keras
 
 class Distilling(layers.Layer):
     def __init__(self, d_model, **kwargs):
@@ -38,15 +38,17 @@ class Embedding(layers.Layer):
         
         # prepare Dropout
         self.dropout= layers.Dropout(dropout)
+        self.norm= layers.LayerNormalization(epsilon=1e-6)
         
     def build(self, input_shape):
         super(Embedding, self).build(input_shape)
         
         # prepare positional embedding
+        #self.max_len = input_shape[0] if isinstance(input_shape, (list, tuple)) else 1000
         self.positional_embedding= self.add_weight(
             name="pos_emb", 
-            shape=(1, 1000, self.d_model), 
-            initializer='random_normal',
+            shape=(1, 1008, self.d_model), 
+            initializer= keras.initializers.TruncatedNormal(stddev=0.02),
             trainable=True
             )
         
@@ -66,7 +68,7 @@ class Embedding(layers.Layer):
         time_emb= hour + weekday + month
         
         # combine embeddings
-        combined_emb= value_emb + self.positional_embedding[:, :seq_len, :] + time_emb
+        combined_emb= self.norm(value_emb + self.positional_embedding[:, :seq_len, :] + time_emb)
         
         return self.dropout(combined_emb)
     
@@ -110,6 +112,7 @@ class ProbSparse(layers.Layer):
               context= None,
               context_time= None):
         
+        times= tf.cast(times, tf.int32)
         if self.cross and context is not None:
             # generate input 
             input_emb= self.input_emb(values, times)
